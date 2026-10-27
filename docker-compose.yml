@@ -1,0 +1,20 @@
+services:
+  yordamchi-bot:
+    build: .
+    container_name: yordamchi-bot
+    restart: unless-stopped
+    ports:
+      # Bind to localhost only; put a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel)
+      # in front, serving https://bot.mydomain.com -> 127.0.0.1:8080
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Edit this file on the host; the bot hot-reloads it (no restart needed,
+      # except for BotToken / WebhookUrl / WebhookSecret which are read at startup).
+      - ./appsettings.json:/app/appsettings.json:ro
+    mem_limit: 128m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

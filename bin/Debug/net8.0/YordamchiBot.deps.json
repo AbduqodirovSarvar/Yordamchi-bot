@@ -1,0 +1,41 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "YordamchiBot/1.0.0": {
+        "dependencies": {
+          "Telegram.Bot": "22.10.3"
+        },
+        "runtime": {
+          "YordamchiBot.dll": {}
+        }
+      },
+      "Telegram.Bot/22.10.3": {
+        "runtime": {
+          "lib/net6.0/Telegram.Bot.dll": {
+            "assemblyVersion": "22.10.3.0",
+            "fileVersion": "22.10.3.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "YordamchiBot/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Telegram.Bot/22.10.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-ni2Jf5AJIl7P+kcjyKplu/5HVSg/rqy3C9TWWsYXKuNaFtp16+H5ZhlwCRHcxIooeuNBPka3MaDd7LOTXE5h2w==",
+      "path": "telegram.bot/22.10.3",
+      "hashPath": "telegram.bot.22.10.3.nupkg.sha512"
+    }
+  }
+}

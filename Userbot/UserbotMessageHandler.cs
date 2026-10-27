@@ -21,7 +21,7 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
     private sealed record Job(Message[] Messages, RouteConfig[] Routes);
 
     private readonly System.Threading.Channels.Channel<Job> _queue = System.Threading.Channels.Channel.CreateBounded<Job>(
-        new BoundedChannelOptions(200) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+        new BoundedChannelOptions(Math.Max(1, options.CurrentValue.QueueSize)) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
 
     private readonly ConcurrentDictionary<long, List<Message>> _albums = new();
     private readonly Dictionary<long, InputPeer> _peers = [];
@@ -92,7 +92,9 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
     private void Enqueue(Job job)
     {
         if (!_queue.Writer.TryWrite(job))
-            log.LogWarning("Queue is full, message dropped");
+            log.LogWarning("Queue is full ({Size}), message dropped", options.CurrentValue.QueueSize);
+        else if (_queue.Reader.Count >= 50)
+            log.LogInformation("Queue backlog: {Count} posts waiting", _queue.Reader.Count);
     }
 
     // ---------------------------------------------------------------- Consumer

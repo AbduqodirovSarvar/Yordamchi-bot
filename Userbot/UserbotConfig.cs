@@ -31,6 +31,9 @@ public sealed class UserbotConfig
     /// <summary>Caption limit: 1024 for normal accounts, 2048 for Telegram Premium.</summary>
     public int CaptionLimit { get; set; } = 1024;
 
+    /// <summary>How many posts may wait in the queue (read once at startup). Queued items are tiny; media is downloaded only when its turn comes.</summary>
+    public int QueueSize { get; set; } = 5000;
+
     public List<RouteConfig> Routes { get; set; } = [];
 }
 

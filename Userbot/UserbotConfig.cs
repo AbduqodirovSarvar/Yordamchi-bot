@@ -31,24 +31,55 @@ public sealed class UserbotConfig
     /// <summary>Caption limit: 1024 for normal accounts, 2048 for Telegram Premium.</summary>
     public int CaptionLimit { get; set; } = 1024;
 
-    /// <summary>Words / phrases removed from every post of every route (case-insensitive, whole words).</summary>
-    public string[] RemoveWords { get; set; } = [];
-
     public List<RouteConfig> Routes { get; set; } = [];
 }
 
-/// <summary>One independent Source(s) -> Target(s) pipeline with its own footer text.</summary>
+/// <summary>
+/// One independent Source(s) -> Target(s) pipeline. What it does depends on the fields present:
+/// <list type="bullet">
+/// <item>only SourceChannelIds + TargetChannelIds: the post is re-published unchanged (not forwarded);</item>
+/// <item>ReplacementText and/or RemoveWords (or an explicit Remove* flag = true): the text is edited.
+/// Links, @usernames and phone numbers are then removed too, unless switched off with Remove* = false.</item>
+/// </list>
+/// </summary>
 public sealed class RouteConfig
 {
-    public string Name { get; set; } = "";
+    public string RouteName { get; set; } = "";
 
     /// <summary>Channel IDs in the usual "-100..." form.</summary>
     public long[] SourceChannelIds { get; set; } = [];
     public long[] TargetChannelIds { get; set; } = [];
 
-    /// <summary>Extra words removed only for this route (added to the global list).</summary>
+    /// <summary>Words / phrases removed from the text (case-insensitive, whole words). Optional.</summary>
     public string[] RemoveWords { get; set; } = [];
 
-    /// <summary>Appended to the cleaned text (plain text).</summary>
+    /// <summary>Appended to the edited text (plain text). Optional.</summary>
     public string ReplacementText { get; set; } = "";
+
+    /// <summary>Optional overrides; when omitted they default to true on an editing route and are ignored on a pass-through route.</summary>
+    public bool? RemoveLinks { get; set; }
+    public bool? RemoveUsernames { get; set; }
+    public bool? RemovePhones { get; set; }
+
+    /// <summary>
+    /// Optional. Text put where the first link / @username / phone number was found (instead of just deleting it).
+    /// Further matches of the same kind are removed, so the text is not repeated. Empty = just remove.
+    /// </summary>
+    public string LinkReplacement { get; set; } = "";
+    public string UsernameReplacement { get; set; } = "";
+    public string PhoneReplacement { get; set; } = "";
+
+    /// <summary>True if this route changes the text in any way; false = copy the post exactly as it is.</summary>
+    public bool Edits =>
+        !string.IsNullOrEmpty(ReplacementText) || RemoveWords.Length > 0 ||
+        !string.IsNullOrEmpty(LinkReplacement) || !string.IsNullOrEmpty(UsernameReplacement) || !string.IsNullOrEmpty(PhoneReplacement) ||
+        RemoveLinks == true || RemoveUsernames == true || RemovePhones == true;
+
+    public bool CleanLinks => Edits && (RemoveLinks ?? true);
+    public bool CleanUsernames => Edits && (RemoveUsernames ?? true);
+    public bool CleanPhones => Edits && (RemovePhones ?? true);
+
+    /// <summary>The text-editing rules of this route, as understood by <see cref="TextCleaner"/>.</summary>
+    public CleanOptions ToCleanOptions() =>
+        new(RemoveWords, CleanLinks, CleanUsernames, CleanPhones, LinkReplacement, UsernameReplacement, PhoneReplacement);
 }

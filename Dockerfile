@@ -10,13 +10,12 @@ COPY . .
 RUN dotnet publish -c Release -o /app/publish --no-restore -p:UseAppHost=false
 
 # ---------- runtime ----------
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS final
+FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine AS final
 WORKDIR /app
 
 # Small-footprint runtime: workstation non-concurrent GC, conserve memory, no ICU (invariant globalization),
 # polling file watcher so edits to the bind-mounted appsettings.json are always noticed.
-ENV ASPNETCORE_HTTP_PORTS=8080 \
-    DOTNET_gcServer=0 \
+ENV DOTNET_gcServer=0 \
     DOTNET_gcConcurrent=0 \
     DOTNET_GCConserveMemory=7 \
     DOTNET_TieredPGO=0 \
@@ -30,5 +29,4 @@ COPY --from=build /app/publish .
 
 # Session directory (mounted from the host in docker-compose.yml); user is set in compose
 RUN mkdir -p /app/session && chmod 777 /app/session
-EXPOSE 8080
 ENTRYPOINT ["dotnet", "YordamchiBot.dll"]

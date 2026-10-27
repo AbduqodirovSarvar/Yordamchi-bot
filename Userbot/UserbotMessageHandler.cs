@@ -32,17 +32,31 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
     /// <summary>Config uses the "-100xxxxxxxxxx" form, MTProto uses the bare channel id. Both map to the same value here.</summary>
     private static long Normalize(long id) => id <= -ChannelIdBase ? -id - ChannelIdBase : Math.Abs(id);
 
+    /// <summary>Does the configured ID ("-100..." channel, "-123" basic group) refer to this message's peer?</summary>
+    private static bool IsSource(long configuredId, Peer peer) => peer switch
+    {
+        PeerChannel c => configuredId > 0 ? configuredId == c.channel_id : configuredId <= -ChannelIdBase && -configuredId - ChannelIdBase == c.channel_id,
+        PeerChat g => configuredId is < 0 and > -ChannelIdBase && -configuredId == g.chat_id,
+        _ => false
+    };
+
     public void OnUpdates(UpdatesBase updates)
     {
         try
         {
             foreach (var update in updates.UpdateList)
             {
-                if (update is not UpdateNewChannelMessage { message: Message msg }) continue;
-                if (msg.peer_id is not PeerChannel peer) continue;
+                // Channels deliver UpdateNewChannelMessage; basic groups / private chats deliver UpdateNewMessage.
+                var msg = update switch
+                {
+                    UpdateNewChannelMessage { message: Message m } => m,
+                    UpdateNewMessage { message: Message m } => m,
+                    _ => null
+                };
+                if (msg?.peer_id is null) continue;
 
                 var routes = options.CurrentValue.Routes
-                    .Where(r => r.SourceChannelIds.Any(s => Normalize(s) == peer.channel_id))
+                    .Where(r => r.SourceChannelIds.Any(s => IsSource(s, msg.peer_id)))
                     .ToArray();
                 if (routes.Length == 0) continue;
 
@@ -108,7 +122,9 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
     private async Task ProcessAsync(Client client, Job job, CancellationToken ct)
     {
         var cfg = options.CurrentValue;
-        var rawText = job.Messages.Select(m => m.message).FirstOrDefault(t => !string.IsNullOrEmpty(t));
+        var textMsg = job.Messages.FirstOrDefault(m => !string.IsNullOrEmpty(m.message));
+        var rawText = textMsg?.message;
+        var rawEntities = textMsg?.entities;     // bold / italic / links; reused only when the text stays unchanged
 
         // 1) Download media once (MemoryStream), then upload once and reuse the uploaded file for every target.
         var media = new List<InputMedia>();
@@ -138,8 +154,20 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
         // 2) Publish per route / per target.
         foreach (var route in job.Routes)
         {
-            var text = TextCleaner.Build(rawText, route.ReplacementText ?? "", media.Count > 0 ? cfg.CaptionLimit : MaxText,
-                cfg.RemoveWords.Concat(route.RemoveWords));
+            // A route with only source + target copies the post untouched (keeping its formatting);
+            // otherwise the text is cleaned, filtered and the footer appended.
+            string text;
+            MessageEntity[]? entities = null;
+            if (route.Edits)
+            {
+                text = TextCleaner.Build(rawText, route.ReplacementText ?? "", media.Count > 0 ? cfg.CaptionLimit : MaxText,
+                    route.ToCleanOptions());
+            }
+            else
+            {
+                text = rawText ?? "";
+                entities = rawEntities;
+            }
 
             foreach (var targetId in route.TargetChannelIds)
             {
@@ -149,7 +177,7 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
                     var peer = await ResolvePeerAsync(client, targetId);
                     if (peer is null)
                     {
-                        log.LogWarning("[{Route}] target {Target} not found among the account's chats (is it a member?)", route.Name, targetId);
+                        log.LogWarning("[{Route}] target {Target} not found among the account's chats (is it a member?)", route.RouteName, targetId);
                         continue;
                     }
 
@@ -158,17 +186,21 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
 
                     await WithFloodWaitAsync(async () =>
                     {
-                        if (media.Count == 0) await client.SendMessageAsync(peer, text, null, 0, null, default, Client.LinkPreview.Disabled);
-                        else if (media.Count == 1) await client.SendMessageAsync(peer, text, media[0]);
-                        else await client.SendAlbumAsync(peer, media, text);
+                        if (media.Count == 0)
+                        {
+                            if (route.Edits) await client.SendMessageAsync(peer, text, null, 0, null, default, Client.LinkPreview.Disabled);
+                            else await client.SendMessageAsync(peer, text, null, 0, entities);
+                        }
+                        else if (media.Count == 1) await client.SendMessageAsync(peer, text, media[0], 0, entities);
+                        else await client.SendAlbumAsync(peer, media, text, 0, entities);
                     }, ct);
 
-                    log.LogInformation("[{Route}] sent to {Target}", route.Name, targetId);
+                    log.LogInformation("[{Route}] sent to {Target}", route.RouteName, targetId);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
-                    log.LogError(ex, "[{Route}] sending to {Target} failed", route.Name, targetId);
+                    log.LogError(ex, "[{Route}] sending to {Target} failed", route.RouteName, targetId);
                 }
             }
         }

@@ -17,8 +17,9 @@ public sealed class UserbotWorker(IOptionsMonitor<UserbotConfig> options, Userbo
         Helpers.Log = (level, text) => wtLog.Log((LogLevel)Math.Clamp(level, 0, 6), "{Text}", text);
 
         var cfg = options.CurrentValue;       // credentials are fixed for the process lifetime
-        if (cfg.ApiId == 0 || string.IsNullOrWhiteSpace(cfg.ApiHash) || cfg.ApiHash == "YOUR_API_HASH")
-            throw new InvalidOperationException("UserbotConfig:ApiId / ApiHash are not set in appsettings.json.");
+        if (cfg.ApiId == 0 || string.IsNullOrWhiteSpace(cfg.ApiHash) || string.IsNullOrWhiteSpace(cfg.PhoneNumber))
+            throw new InvalidOperationException(
+                "UserbotConfig__ApiId / UserbotConfig__ApiHash / UserbotConfig__PhoneNumber are not set. Put them in .env (see .env.example).");
 
         while (!ct.IsCancellationRequested)
         {

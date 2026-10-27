@@ -6,3 +6,6 @@ Dockerfile
 docker-compose.yml
 *.http
 appsettings.Development.json
+.env
+.env.example
+appsettings.example.json

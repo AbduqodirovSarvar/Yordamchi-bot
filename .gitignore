@@ -1,0 +1,10 @@
+# Secrets and login state - never commit
+.env
+appsettings.json
+appsettings.*.json
+session/
+*.session
+
+bin/
+obj/
+.vs/

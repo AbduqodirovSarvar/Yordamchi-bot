@@ -1,6 +1,0 @@
-@YordamchiBot_HostAddress = http://localhost:5200
-
-GET {{YordamchiBot_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

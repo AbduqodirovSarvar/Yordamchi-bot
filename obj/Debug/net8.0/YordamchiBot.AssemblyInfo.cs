@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("YordamchiBot")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a7721f5a5fcae38efb6bec4a92f7331a24164100")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+effa6e15a40509247b097d7fdbcd7bee7a40d24e")]
 [assembly: System.Reflection.AssemblyProductAttribute("YordamchiBot")]
 [assembly: System.Reflection.AssemblyTitleAttribute("YordamchiBot")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -9,6 +9,9 @@ public sealed class BotConfig
 {
     public const string SectionName = "BotConfig";
 
+    /// <summary>Set false to run only the userbot part.</summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>Bot token from @BotFather (read once at startup).</summary>
     public string BotToken { get; set; } = "";
 
@@ -29,6 +32,9 @@ public sealed class BotConfig
 
     /// <summary>Channels the cleaned message is re-published to.</summary>
     public long[] TargetChannelIds { get; set; } = [];
+
+    /// <summary>Words / phrases removed from every post (case-insensitive, whole words).</summary>
+    public string[] RemoveWords { get; set; } = [];
 
     /// <summary>Text appended to the cleaned message (plain text, no parse mode).</summary>
     public string ReplacementText { get; set; } = "";

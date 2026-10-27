@@ -1,20 +1,33 @@
 services:
-  yordamchi-bot:
+  yordamchi:
     build: .
-    container_name: yordamchi-bot
+    container_name: yordamchi
     restart: unless-stopped
+    stdin_open: true        # needed only for the very first userbot login (see below)
+    tty: true
+    # Match your host user so the session file is writable (Linux: `id -u`, `id -g`).
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       # Bind to localhost only; put a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel)
       # in front, serving https://bot.mydomain.com -> 127.0.0.1:8080
       - "127.0.0.1:8080:8080"
     volumes:
-      # Edit this file on the host; the bot hot-reloads it (no restart needed,
-      # except for BotToken / WebhookUrl / WebhookSecret which are read at startup).
+      # Edit on the host; channels, routes, texts and delays hot-reload without a restart
+      # (tokens / ApiId / ApiHash / PhoneNumber / WebhookUrl need a restart).
       - ./appsettings.json:/app/appsettings.json:ro
-    mem_limit: 128m
+      # Userbot login session. A directory (not a single file) is mounted on purpose: if the file
+      # does not exist yet, Docker would create a *directory* named WTelegram.session in its place.
+      - ./session:/app/session
+    mem_limit: 256m
     cpus: 0.5
     logging:
       driver: json-file
       options:
         max-size: "5m"
         max-file: "2"
+
+# First run (asks for the code Telegram sends you; creates ./session/WTelegram.session):
+#   mkdir session
+#   docker compose run --rm -it --service-ports yordamchi     # Ctrl+C after "Logged in as ..."
+# Normal operation afterwards:
+#   docker compose up -d --build

@@ -23,10 +23,12 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     DOTNET_TieredCompilation=1 \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
     DOTNET_USE_POLLING_FILE_WATCHER=true \
-    DOTNET_EnableDiagnostics=0
+    DOTNET_EnableDiagnostics=0 \
+    UserbotConfig__SessionPath=/app/session/WTelegram.session
 
 COPY --from=build /app/publish .
 
-USER $APP_UID
+# Session directory (mounted from the host in docker-compose.yml); user is set in compose
+RUN mkdir -p /app/session && chmod 777 /app/session
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "YordamchiBot.dll"]

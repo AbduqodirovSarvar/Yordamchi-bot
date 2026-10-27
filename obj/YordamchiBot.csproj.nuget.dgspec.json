@@ -49,6 +49,10 @@
             "Telegram.Bot": {
               "target": "Package",
               "version": "[22.10.3, )"
+            },
+            "WTelegramClient": {
+              "target": "Package",
+              "version": "[4.4.9, )"
             }
           },
           "imports": [

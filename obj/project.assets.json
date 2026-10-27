@@ -86,6 +86,19 @@
             "related": ".pdb;.xml"
           }
         }
+      },
+      "WTelegramClient/4.4.9": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/WTelegramClient.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/WTelegramClient.dll": {
+            "related": ".xml"
+          }
+        }
       }
     }
   },
@@ -290,11 +303,31 @@
         "telegram.bot.22.10.3.nupkg.sha512",
         "telegram.bot.nuspec"
       ]
+    },
+    "WTelegramClient/4.4.9": {
+      "sha512": "K4xOqTx8J9/g/Qzwk4YHxcMnO3CrL5ascHW3Ka/TZcGK5hryAKUOW/e2SzoU/ilqXBV//Hn9RXW2wmn+OcRoXA==",
+      "type": "package",
+      "path": "wtelegramclient/4.4.9",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/net5.0/WTelegramClient.dll",
+        "lib/net5.0/WTelegramClient.xml",
+        "lib/net8.0/WTelegramClient.dll",
+        "lib/net8.0/WTelegramClient.xml",
+        "lib/netstandard2.0/WTelegramClient.dll",
+        "lib/netstandard2.0/WTelegramClient.xml",
+        "logo.png",
+        "wtelegramclient.4.4.9.nupkg.sha512",
+        "wtelegramclient.nuspec"
+      ]
     }
   },
   "projectFileDependencyGroups": {
     "net8.0": [
-      "Telegram.Bot >= 22.10.3"
+      "Telegram.Bot >= 22.10.3",
+      "WTelegramClient >= 4.4.9"
     ]
   },
   "packageFolders": {
@@ -345,6 +378,10 @@
           "Telegram.Bot": {
             "target": "Package",
             "version": "[22.10.3, )"
+          },
+          "WTelegramClient": {
+            "target": "Package",
+            "version": "[4.4.9, )"
           }
         },
         "imports": [

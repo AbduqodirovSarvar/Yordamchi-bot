@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
@@ -14,7 +13,7 @@ namespace YordamchiBot;
 /// append the configured footer and re-publish (never forward) to every target channel.
 /// Registered as a singleton; holds only a tiny buffer for in-flight albums.
 /// </summary>
-public sealed partial class TelegramWebhookHandler(
+public sealed class TelegramWebhookHandler(
     ITelegramBotClient bot,
     IOptionsMonitor<BotConfig> options,
     ILogger<TelegramWebhookHandler> log)
@@ -26,66 +25,8 @@ public sealed partial class TelegramWebhookHandler(
     private static readonly TimeSpan AlbumWindow = TimeSpan.FromMilliseconds(1500);
     private readonly ConcurrentDictionary<string, List<Message>> _albums = new();
 
-    // ---------------------------------------------------------------- Regex (source-generated, no startup cost)
-
-    // http(s)://..., www...., t.me/..., telegram.me/..., tg://...
-    [GeneratedRegex(@"(?:https?://|www\.|tg://|(?:t|telegram)\.me/)\S+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex UrlRegex();
-
-    // @username (5-32 chars per Telegram rules, relaxed to 4+); the lookbehind skips e-mail addresses.
-    [GeneratedRegex(@"(?<![\w@])@[A-Za-z][A-Za-z0-9_]{3,31}\b", RegexOptions.CultureInvariant)]
-    private static partial Regex UsernameRegex();
-
-    // Any digit run with common separators ( + ( ) - . space ). The evaluator keeps it only if it has
-    // 9-15 digits, so prices, dates and short numbers survive:
-    // +998901234567 | 998 90 123-45-67 | (90) 123 45 67 | 90-123-45-67
-    [GeneratedRegex(@"(?<![\w])\+?\(?\d[\d \t().\-]{6,}\d(?!\w)", RegexOptions.CultureInvariant)]
-    private static partial Regex PhoneRegex();
-
-    [GeneratedRegex(@"[ \t]{2,}")]
-    private static partial Regex MultiSpaceRegex();
-
-    [GeneratedRegex(@"[ \t]+\n")]
-    private static partial Regex TrailingSpaceRegex();
-
-    [GeneratedRegex(@"\n{3,}")]
-    private static partial Regex ManyNewlinesRegex();
-
-    private static string RemovePhone(Match m)
-    {
-        var digits = 0;
-        foreach (var c in m.ValueSpan) if (char.IsAsciiDigit(c)) digits++;
-        return digits is >= 9 and <= 15 ? "" : m.Value;
-    }
-
-    /// <summary>Removes links, @usernames and phone numbers and tidies the leftover whitespace.</summary>
-    public static string Clean(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return "";
-
-        text = UrlRegex().Replace(text, "");          // first: URLs may contain digits and @
-        text = UsernameRegex().Replace(text, "");
-        text = PhoneRegex().Replace(text, RemovePhone);
-
-        text = MultiSpaceRegex().Replace(text, " ");
-        text = TrailingSpaceRegex().Replace(text, "\n");
-        text = ManyNewlinesRegex().Replace(text, "\n\n");
-        return text.Trim();
-    }
-
-    /// <summary>Cleans <paramref name="original"/>, appends the footer and fits the result into <paramref name="limit"/>.</summary>
-    private string BuildText(string? original, int limit)
-    {
-        var footer = options.CurrentValue.ReplacementText ?? "";
-        var body = Clean(original);
-
-        if (body.Length == 0) return footer.TrimStart().Length <= limit ? footer.TrimStart() : footer[..limit];
-
-        var room = limit - footer.Length;
-        if (room < 1) return footer[..Math.Min(footer.Length, limit)];
-        if (body.Length > room) body = body[..(room - 1)].TrimEnd() + "…";
-        return body + footer;
-    }
+    private string BuildText(string? original, int limit) =>
+        TextCleaner.Build(original, options.CurrentValue.ReplacementText ?? "", limit, options.CurrentValue.RemoveWords);
 
     // ---------------------------------------------------------------- Update entry point
 

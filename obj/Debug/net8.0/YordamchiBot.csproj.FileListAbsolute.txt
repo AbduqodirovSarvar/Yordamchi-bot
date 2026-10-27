@@ -29,3 +29,5 @@ C:\Users\S.Abdukadirov\Documents\Projects\Yordamchi bot\YordamchiBot\obj\Debug\n
 C:\Users\S.Abdukadirov\Documents\Projects\Yordamchi bot\YordamchiBot\obj\Debug\net8.0\YordamchiBot.pdb
 C:\Users\S.Abdukadirov\Documents\Projects\Yordamchi bot\YordamchiBot\obj\Debug\net8.0\YordamchiBot.genruntimeconfig.cache
 C:\Users\S.Abdukadirov\Documents\Projects\Yordamchi bot\YordamchiBot\obj\Debug\net8.0\ref\YordamchiBot.dll
+C:\Users\S.Abdukadirov\Documents\Projects\Yordamchi bot\YordamchiBot\bin\Debug\net8.0\WTelegramClient.dll
+C:\Users\S.Abdukadirov\Documents\Projects\Yordamchi bot\YordamchiBot\obj\Debug\net8.0\YordamchiBot.sourcelink.json

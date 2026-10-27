@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "Fe4o+jRiebA=",
+  "dgSpecHash": "ROnZzTmYgNA=",
   "success": true,
   "projectFilePath": "C:\\Users\\S.Abdukadirov\\Documents\\Projects\\Yordamchi bot\\YordamchiBot\\YordamchiBot.csproj",
   "expectedPackageFiles": [
@@ -8,7 +8,8 @@
     "C:\\Users\\S.Abdukadirov\\.nuget\\packages\\microsoft.extensions.options\\8.0.0\\microsoft.extensions.options.8.0.0.nupkg.sha512",
     "C:\\Users\\S.Abdukadirov\\.nuget\\packages\\microsoft.extensions.primitives\\8.0.0\\microsoft.extensions.primitives.8.0.0.nupkg.sha512",
     "C:\\Users\\S.Abdukadirov\\.nuget\\packages\\system.text.json\\8.0.5\\system.text.json.8.0.5.nupkg.sha512",
-    "C:\\Users\\S.Abdukadirov\\.nuget\\packages\\telegram.bot\\22.10.3\\telegram.bot.22.10.3.nupkg.sha512"
+    "C:\\Users\\S.Abdukadirov\\.nuget\\packages\\telegram.bot\\22.10.3\\telegram.bot.22.10.3.nupkg.sha512",
+    "C:\\Users\\S.Abdukadirov\\.nuget\\packages\\wtelegramclient\\4.4.9\\wtelegramclient.4.4.9.nupkg.sha512"
   ],
   "logs": []
 }

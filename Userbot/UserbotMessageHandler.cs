@@ -18,7 +18,37 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
     private static readonly TimeSpan PeerRefreshCooldown = TimeSpan.FromMinutes(2);
 
     /// <summary>A single message or a whole album, plus the routes it matched.</summary>
-    private sealed record Job(Message[] Messages, RouteConfig[] Routes);
+    /// <param name="Done">Routes this post already travelled through (chain A to B to C); stops endless loops.</param>
+    private sealed record Job(Message[] Messages, RouteConfig[] Routes, RouteConfig[]? Done = null);
+
+    /// <summary>Posts already queued, so the same message is never handled twice (own sends vs. incoming updates).</summary>
+    private readonly ConcurrentDictionary<(long Peer, int Id), DateTime> _seen = new();
+
+    private static long PeerKey(Peer p) => p switch { PeerChannel c => c.channel_id, PeerChat g => -g.chat_id, _ => 0 };
+
+    private bool TryMark(Message m)
+    {
+        if (_seen.Count > 5000)
+            foreach (var (k, t) in _seen) if (DateTime.UtcNow - t > TimeSpan.FromMinutes(10)) _seen.TryRemove(k, out _);
+        return _seen.TryAdd((PeerKey(m.peer_id), m.id), DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// Telegram does not push the account's own API-sent messages back as updates, so a post sent to a channel that is
+    /// also a source of another route is queued here directly (chaining A to B to C).
+    /// </summary>
+    private void Chain(Message[]? sent, Job job, RouteConfig route)
+    {
+        if (sent is not { Length: > 0 } || sent[0].peer_id is null) return;
+        var visited = (job.Done ?? []).Append(route).ToArray();
+        var next = options.CurrentValue.Routes
+            .Where(r => !visited.Contains(r) && r.SourceChannelIds.Any(s => IsSource(s, sent[0].peer_id)))
+            .ToArray();
+        if (next.Length == 0) return;
+
+        var items = sent.Where(TryMark).OrderBy(m => m.id).ToArray();
+        if (items.Length > 0) Enqueue(new Job(items, next, visited));
+    }
 
     private readonly System.Threading.Channels.Channel<Job> _queue = System.Threading.Channels.Channel.CreateBounded<Job>(
         new BoundedChannelOptions(Math.Max(1, options.CurrentValue.QueueSize)) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
@@ -58,7 +88,7 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
                 var routes = options.CurrentValue.Routes
                     .Where(r => r.SourceChannelIds.Any(s => IsSource(s, msg.peer_id)))
                     .ToArray();
-                if (routes.Length == 0) continue;
+                if (routes.Length == 0 || !TryMark(msg)) continue;
 
                 if (msg.grouped_id != 0) BufferAlbum(msg, routes);
                 else Enqueue(new Job([msg], routes));
@@ -196,18 +226,19 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
                     // Human-like pause to stay under Telegram's anti-spam radar.
                     await Task.Delay(Random.Shared.Next(cfg.MinDelayMs, Math.Max(cfg.MinDelayMs, cfg.MaxDelayMs) + 1), ct);
 
+                    Message[]? sent = null;
                     await WithFloodWaitAsync(async () =>
                     {
                         if (media.Count == 0)
-                        {
-                            if (route.Edits) await client.SendMessageAsync(peer, text, null, 0, null, default, Client.LinkPreview.Disabled);
-                            else await client.SendMessageAsync(peer, text, null, 0, entities);
-                        }
-                        else if (media.Count == 1) await client.SendMessageAsync(peer, text, media[0], 0, entities);
-                        else await client.SendAlbumAsync(peer, media, text, 0, entities);
+                            sent = [route.Edits
+                                ? await client.SendMessageAsync(peer, text, null, 0, null, default, Client.LinkPreview.Disabled)
+                                : await client.SendMessageAsync(peer, text, null, 0, entities)];
+                        else if (media.Count == 1) sent = [await client.SendMessageAsync(peer, text, media[0], 0, entities)];
+                        else sent = await client.SendAlbumAsync(peer, media, text, 0, entities);
                     }, ct);
 
                     log.LogInformation("[{Route}] sent to {Target}", route.RouteName, targetId);
+                    Chain(sent, job, route);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (Exception ex)

@@ -122,6 +122,16 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
     private async Task ProcessAsync(Client client, Job job, CancellationToken ct)
     {
         var cfg = options.CurrentValue;
+
+        // Route filter OnlyWithPhoto: the post (or at least one item of an album) must contain a photo.
+        var hasPhoto = job.Messages.Any(m => m.media is MessageMediaPhoto);
+        var routes = job.Routes.Where(r => !r.OnlyWithPhoto || hasPhoto).ToArray();
+        if (routes.Length == 0)
+        {
+            log.LogDebug("Message {Id}: no photo, skipped by OnlyWithPhoto", job.Messages[0].id);
+            return;       // nothing to send, so nothing is downloaded either
+        }
+
         var textMsg = job.Messages.FirstOrDefault(m => !string.IsNullOrEmpty(m.message));
         var rawText = textMsg?.message;
         var rawEntities = textMsg?.entities;     // bold / italic / links; reused only when the text stays unchanged
@@ -152,7 +162,7 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
         if (media.Count == 0 && string.IsNullOrWhiteSpace(rawText)) return;
 
         // 2) Publish per route / per target.
-        foreach (var route in job.Routes)
+        foreach (var route in routes)
         {
             // A route with only source + target copies the post untouched (keeping its formatting);
             // otherwise the text is cleaned, filtered and the footer appended.

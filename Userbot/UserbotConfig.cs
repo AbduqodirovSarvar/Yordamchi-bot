@@ -53,6 +53,12 @@ public sealed class RouteConfig
     /// <summary>Words / phrases removed from the text (case-insensitive, whole words). Optional.</summary>
     public string[] RemoveWords { get; set; } = [];
 
+    /// <summary>
+    /// Filter, optional. true = only posts that contain a photo are copied (an album counts if any item is a photo);
+    /// text-only posts, videos and files are skipped. Does not make the route "editing".
+    /// </summary>
+    public bool OnlyWithPhoto { get; set; }
+
     /// <summary>Appended to the edited text (plain text). Optional.</summary>
     public string ReplacementText { get; set; } = "";
 

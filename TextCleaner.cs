@@ -56,6 +56,10 @@ public static partial class TextCleaner
         return digits is >= 9 and <= 15;
     }
 
+    /// <summary>The first phone number in the text, as written there (e.g. "93 563 35 35"), or null.</summary>
+    public static string? FindPhone(string? text) =>
+        string.IsNullOrEmpty(text) ? null : PhoneRegex().Matches(text).FirstOrDefault(IsPhone)?.Value;
+
     /// <summary>Removes links, @usernames, phone numbers and the configured words, and tidies leftover whitespace.</summary>
     public static string Clean(string? text, CleanOptions? o = null)
     {

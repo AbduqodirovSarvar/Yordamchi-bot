@@ -34,6 +34,9 @@ public sealed class UserbotConfig
     /// <summary>How many posts may wait in the queue (read once at startup). Queued items are tiny; media is downloaded only when its turn comes.</summary>
     public int QueueSize { get; set; } = 5000;
 
+    /// <summary>How long to wait for the bot's reply on a PhoneFromBot route; no phone within this time = post skipped.</summary>
+    public int BotReplyTimeoutSec { get; set; } = 20;
+
     public List<RouteConfig> Routes { get; set; } = [];
 }
 
@@ -78,9 +81,22 @@ public sealed class RouteConfig
     public string UsernameReplacement { get; set; } = "";
     public string PhoneReplacement { get; set; } = "";
 
+    /// <summary>
+    /// Optional. true = the post's "t.me/SomeBot?start=..." button is pressed (the bot is started with that parameter),
+    /// the phone number is taken from the bot's reply and added through PhoneTemplate. Posts without such a button,
+    /// or whose bot sends no phone number in time, are skipped on this route. Makes the route "editing".
+    /// </summary>
+    public bool PhoneFromBot { get; set; }
+
+    /// <summary>Line added for the phone number from the bot ({phone} is replaced); placed before ReplacementText.</summary>
+    public string PhoneTemplate { get; set; } = "\n\n📞 Aloqa: {phone}";
+
+    /// <summary>Optional. Only the button whose label contains this text is pressed (e.g. "Qo'ng'iroq"); empty = the first bot button.</summary>
+    public string PhoneButtonText { get; set; } = "";
+
     /// <summary>True if this route changes the text in any way; false = copy the post exactly as it is.</summary>
     public bool Edits =>
-        !string.IsNullOrEmpty(ReplacementText) || RemoveWords.Length > 0 ||
+        PhoneFromBot || !string.IsNullOrEmpty(ReplacementText) || RemoveWords.Length > 0 ||
         !string.IsNullOrEmpty(LinkReplacement) || !string.IsNullOrEmpty(UsernameReplacement) || !string.IsNullOrEmpty(PhoneReplacement) ||
         RemoveLinks == true || RemoveUsernames == true || RemovePhones == true;
 

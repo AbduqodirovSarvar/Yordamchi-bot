@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
 using TL;
@@ -10,7 +11,7 @@ namespace YordamchiBot.Userbot;
 /// Core logic. OnUpdates only filters and enqueues (it must return fast); a single background consumer
 /// downloads media, cleans text, waits a human-like delay and publishes NEW messages (never forwards).
 /// </summary>
-public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options, ILogger<UserbotMessageHandler> log)
+public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options, ILogger<UserbotMessageHandler> log)
 {
     private const int MaxText = 4096;
     private const long ChannelIdBase = 1_000_000_000_000;
@@ -76,6 +77,15 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
         {
             foreach (var update in updates.UpdateList)
             {
+                // A reply (or an edited reply) of the bot we are waiting for on a PhoneFromBot route.
+                var dm = update switch
+                {
+                    UpdateEditMessage { message: Message e } => e,
+                    UpdateNewMessage { message: Message n } => n,
+                    _ => null
+                };
+                if (dm is not null && TryTakeBotReply(dm)) continue;
+
                 // Channels deliver UpdateNewChannelMessage; basic groups / private chats deliver UpdateNewMessage.
                 var msg = update switch
                 {
@@ -164,6 +174,14 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
             return;       // nothing to send, so nothing is downloaded either
         }
 
+        // Route option PhoneFromBot: get the contact through the post's bot button; without it the route skips the post.
+        // Routes asking for the same button share one bot start.
+        var botPhones = new Dictionary<string, string>();
+        foreach (var buttonText in routes.Where(r => r.PhoneFromBot).Select(r => r.PhoneButtonText).Distinct())
+            if (await GetPhoneFromBotAsync(client, job.Messages, buttonText, ct) is { } phone) botPhones[buttonText] = phone;
+        routes = routes.Where(r => !r.PhoneFromBot || botPhones.ContainsKey(r.PhoneButtonText)).ToArray();
+        if (routes.Length == 0) return;
+
         var textMsg = job.Messages.FirstOrDefault(m => !string.IsNullOrEmpty(m.message));
         var rawText = textMsg?.message;
         var rawEntities = textMsg?.entities;     // bold / italic / links; reused only when the text stays unchanged
@@ -202,8 +220,10 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
             MessageEntity[]? entities = null;
             if (route.Edits)
             {
-                text = TextCleaner.Build(rawText, route.ReplacementText ?? "", media.Count > 0 ? cfg.CaptionLimit : MaxText,
-                    route.ToCleanOptions());
+                var footer = route.PhoneFromBot
+                    ? route.PhoneTemplate.Replace("{phone}", botPhones[route.PhoneButtonText]) + route.ReplacementText
+                    : route.ReplacementText ?? "";
+                text = TextCleaner.Build(rawText, footer, media.Count > 0 ? cfg.CaptionLimit : MaxText, route.ToCleanOptions());
             }
             else
             {
@@ -283,6 +303,111 @@ public sealed class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options
             log.LogError(ex, "Download of message {Id} media failed", m.id);   // e.g. message deleted meanwhile
             return null;
         }
+    }
+
+    // ---------------------------------------------------------------- Phone from bot
+
+    // t.me/SomeBot?start=abc | telegram.me/SomeBot?start=abc | tg://resolve?domain=SomeBot&start=abc
+    [GeneratedRegex(@"(?:(?:https?://)?(?:t|telegram)\.me/(?<bot>[A-Za-z]\w{3,31})\?(?:\S*&)?|tg://resolve\?domain=(?<bot>[A-Za-z]\w{3,31})&(?:\S*&)?)start=(?<param>[\w-]{1,64})",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex StartLinkRegex();
+
+    private static readonly TimeSpan PhoneCacheTtl = TimeSpan.FromHours(6);
+
+    /// <summary>The bot started last; its first reply that contains a phone number completes <see cref="Phone"/>.</summary>
+    private sealed record PendingReply(long BotId, TaskCompletionSource<string> Phone);
+    private volatile PendingReply? _pending;
+
+    // Used only by the single consumer, so no locking needed.
+    private readonly Dictionary<string, User> _bots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(string Bot, string Param), (string Phone, DateTime At)> _phones = [];
+
+    /// <summary>Called from OnUpdates: true if the message is the awaited bot reply (it is then not routed anywhere).</summary>
+    private bool TryTakeBotReply(Message m)
+    {
+        if (_pending is not { } pending || m.peer_id is not PeerUser pu || pu.user_id != pending.BotId
+            || m.flags.HasFlag(Message.Flags.out_)) return false;
+        if (TextCleaner.FindPhone(m.message) is { } phone) pending.Phone.TrySetResult(phone);
+        return true;        // greetings without a number are ignored; we keep waiting for the next message
+    }
+
+    private static (string Bot, string Param)? FindStartLink(Message[] messages, string buttonText)
+    {
+        foreach (var m in messages)
+            if (m.reply_markup is ReplyInlineMarkup markup)
+                foreach (var row in markup.rows)
+                    foreach (var button in row.buttons)
+                        if (button.type is InlineButtonTypeUrl { url: { } url } && StartLinkRegex().Match(url) is { Success: true } match
+                            && (buttonText.Length == 0 || NormalizeLabel(button.text).Contains(NormalizeLabel(buttonText), StringComparison.OrdinalIgnoreCase)))
+                            return (match.Groups["bot"].Value, match.Groups["param"].Value);
+        return null;
+    }
+
+    /// <summary>Uzbek apostrophes come in many forms (' ‘ ’ ʻ ʼ `); unify them so "Qo'ng'iroq" matches "Qo‘ng‘iroq".</summary>
+    private static string NormalizeLabel(string? s) =>
+        (s ?? "").Replace('‘', '\'').Replace('’', '\'').Replace('ʻ', '\'').Replace('ʼ', '\'').Replace('`', '\'');
+
+    /// <summary>
+    /// Presses the post's bot button (Messages_StartBot with the start parameter) and returns the phone number from the reply,
+    /// or null. Answers are cached per button, and the usual random delay runs before every start (anti-spam protection).
+    /// </summary>
+    private async Task<string?> GetPhoneFromBotAsync(Client client, Message[] messages, string buttonText, CancellationToken ct)
+    {
+        var cfg = options.CurrentValue;
+        if (FindStartLink(messages, buttonText) is not { } link)
+        {
+            log.LogInformation("Message {Id}: no bot button with a start link, skipped", messages[0].id);
+            return null;
+        }
+
+        if (_phones.TryGetValue(link, out var cached) && DateTime.UtcNow - cached.At < PhoneCacheTtl) return cached.Phone;
+
+        try
+        {
+            if (!_bots.TryGetValue(link.Bot, out var bot))
+            {
+                var resolved = await client.Contacts_ResolveUsername(link.Bot);
+                if (resolved.peer is not PeerUser pu || !resolved.users.TryGetValue(pu.user_id, out var user) || !user.flags.HasFlag(User.Flags.bot))
+                {
+                    log.LogWarning("Message {Id}: @{Bot} is not a bot, skipped", messages[0].id, link.Bot);
+                    return null;
+                }
+                _bots[link.Bot] = bot = user;
+            }
+
+            // Human-like pause before pressing the button, like before every send.
+            await Task.Delay(Random.Shared.Next(cfg.MinDelayMs, Math.Max(cfg.MinDelayMs, cfg.MaxDelayMs) + 1), ct);
+
+            var pending = new PendingReply(bot.id, new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously));
+            _pending = pending;     // set before starting, so a fast reply is not missed
+            try
+            {
+                await WithFloodWaitAsync(() => client.Messages_StartBot(
+                    bot: new InputUser(bot.id, bot.access_hash), peer: new InputPeerUser(bot.id, bot.access_hash),
+                    random_id: Helpers.RandomLong(), start_param: link.Param), ct);
+
+                var phone = await pending.Phone.Task.WaitAsync(TimeSpan.FromSeconds(cfg.BotReplyTimeoutSec), ct);
+                if (_phones.Count > 1000)
+                    foreach (var (k, v) in _phones) if (DateTime.UtcNow - v.At > PhoneCacheTtl) _phones.Remove(k);
+                _phones[link] = (phone, DateTime.UtcNow);
+                log.LogInformation("Message {Id}: phone {Phone} received from @{Bot}", messages[0].id, phone, link.Bot);
+                return phone;
+            }
+            finally
+            {
+                _pending = null;
+            }
+        }
+        catch (TimeoutException)
+        {
+            log.LogWarning("Message {Id}: @{Bot} sent no phone number within {Sec} s, skipped", messages[0].id, link.Bot, cfg.BotReplyTimeoutSec);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Message {Id}: starting @{Bot} failed, skipped", messages[0].id, link.Bot);
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------- Peers

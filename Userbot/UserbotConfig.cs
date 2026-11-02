@@ -59,6 +59,9 @@ public sealed class RouteConfig
     /// <summary>Words / phrases removed from the text (case-insensitive, whole words). Optional.</summary>
     public string[] RemoveWords { get; set; } = [];
 
+    /// <summary>Whole lines containing any of these texts are removed (case-insensitive), e.g. "Yaratildi:". Optional.</summary>
+    public string[] RemoveLines { get; set; } = [];
+
     /// <summary>
     /// Filter, optional. true = only posts that contain a photo are copied (an album counts if any item is a photo);
     /// text-only posts, videos and files are skipped. Does not make the route "editing".
@@ -96,7 +99,7 @@ public sealed class RouteConfig
 
     /// <summary>True if this route changes the text in any way; false = copy the post exactly as it is.</summary>
     public bool Edits =>
-        PhoneFromBot || !string.IsNullOrEmpty(ReplacementText) || RemoveWords.Length > 0 ||
+        PhoneFromBot || !string.IsNullOrEmpty(ReplacementText) || RemoveWords.Length > 0 || RemoveLines.Length > 0 ||
         !string.IsNullOrEmpty(LinkReplacement) || !string.IsNullOrEmpty(UsernameReplacement) || !string.IsNullOrEmpty(PhoneReplacement) ||
         RemoveLinks == true || RemoveUsernames == true || RemovePhones == true;
 
@@ -106,5 +109,5 @@ public sealed class RouteConfig
 
     /// <summary>The text-editing rules of this route, as understood by <see cref="TextCleaner"/>.</summary>
     public CleanOptions ToCleanOptions() =>
-        new(RemoveWords, CleanLinks, CleanUsernames, CleanPhones, LinkReplacement, UsernameReplacement, PhoneReplacement);
+        new(RemoveWords, CleanLinks, CleanUsernames, CleanPhones, LinkReplacement, UsernameReplacement, PhoneReplacement, RemoveLines);
 }

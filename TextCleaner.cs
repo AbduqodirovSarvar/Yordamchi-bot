@@ -11,7 +11,8 @@ namespace YordamchiBot;
 public sealed record CleanOptions(
     IEnumerable<string>? RemoveWords = null,
     bool Links = true, bool Usernames = true, bool Phones = true,
-    string? LinkReplacement = null, string? UsernameReplacement = null, string? PhoneReplacement = null);
+    string? LinkReplacement = null, string? UsernameReplacement = null, string? PhoneReplacement = null,
+    IEnumerable<string>? RemoveLines = null);
 
 /// <summary>Strips contacts / words from a text and appends a footer.</summary>
 public static partial class TextCleaner
@@ -65,6 +66,12 @@ public static partial class TextCleaner
     {
         if (string.IsNullOrWhiteSpace(text)) return "";
         o ??= new CleanOptions();
+
+        // Whole lines containing any of these markers (e.g. "Yaratildi:") go first, dates and all.
+        var lineMarkers = o.RemoveLines?.Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+        if (lineMarkers is { Length: > 0 })
+            text = string.Join('\n', text.Split('\n')
+                .Where(line => !lineMarkers.Any(s => line.Contains(s, StringComparison.OrdinalIgnoreCase))));
 
         // Replacement texts are parked behind placeholders so later steps (username / phone / word filters)
         // cannot touch them, and swapped in at the very end.

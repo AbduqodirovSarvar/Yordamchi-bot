@@ -29,8 +29,10 @@ jobs:
 
             git pull --ff-only
 
+            # Build first: if the build fails, set -e stops here and the running bot is left untouched
+            docker compose build
             docker compose down
-            docker compose up -d --build
+            docker compose up -d
 
             # Remove dangling images left behind by the rebuild, plus build cache older than a week
             docker image prune -f

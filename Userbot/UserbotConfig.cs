@@ -37,6 +37,9 @@ public sealed class UserbotConfig
     /// <summary>How long to wait for the bot's reply on a PhoneFromBot route; no phone within this time = post skipped.</summary>
     public int BotReplyTimeoutSec { get; set; } = 20;
 
+    /// <summary>Time zone of the daily statistics (/stats in Saved Messages), as an offset from UTC. Uzbekistan = 5.</summary>
+    public int StatsUtcOffsetHours { get; set; } = 5;
+
     public List<RouteConfig> Routes { get; set; } = [];
 }
 

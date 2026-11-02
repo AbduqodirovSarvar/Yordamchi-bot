@@ -50,8 +50,12 @@ public static partial class TextCleaner
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
     }
 
+    // 02.11.2026 / 2.11.26 12:17 - a date (with time) has 9+ digits too, but is not a phone number.
+    [GeneratedRegex(@"^\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})(?:\D|$)")] private static partial Regex DateRegex();
+
     private static bool IsPhone(Match m)
     {
+        if (DateRegex().IsMatch(m.Value)) return false;
         var digits = 0;
         foreach (var c in m.ValueSpan) if (char.IsAsciiDigit(c)) digits++;
         return digits is >= 9 and <= 15;

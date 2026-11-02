@@ -11,7 +11,7 @@ namespace YordamchiBot.Userbot;
 /// Core logic. OnUpdates only filters and enqueues (it must return fast); a single background consumer
 /// downloads media, cleans text, waits a human-like delay and publishes NEW messages (never forwards).
 /// </summary>
-public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options, ILogger<UserbotMessageHandler> log)
+public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig> options, SendStats stats, ILogger<UserbotMessageHandler> log)
 {
     private const int MaxText = 4096;
     private const long ChannelIdBase = 1_000_000_000_000;
@@ -63,6 +63,14 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
     /// <summary>Config uses the "-100xxxxxxxxxx" form, MTProto uses the bare channel id. Both map to the same value here.</summary>
     private static long Normalize(long id) => id <= -ChannelIdBase ? -id - ChannelIdBase : Math.Abs(id);
 
+    /// <summary>The reverse: a peer in the config's form ("-100..." channel, "-123" basic group), as shown in statistics.</summary>
+    private static long ConfiguredId(Peer peer) => peer switch
+    {
+        PeerChannel c => -ChannelIdBase - c.channel_id,
+        PeerChat g => -g.chat_id,
+        _ => 0
+    };
+
     /// <summary>Does the configured ID ("-100..." channel, "-123" basic group) refer to this message's peer?</summary>
     private static bool IsSource(long configuredId, Peer peer) => peer switch
     {
@@ -84,7 +92,7 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
                     UpdateNewMessage { message: Message n } => n,
                     _ => null
                 };
-                if (dm is not null && TryTakeBotReply(dm)) continue;
+                if (dm is not null && (TryTakeBotReply(dm) || TryStatsCommand(dm, update is UpdateEditMessage))) continue;
 
                 // Channels deliver UpdateNewChannelMessage; basic groups / private chats deliver UpdateNewMessage.
                 var msg = update switch
@@ -101,7 +109,11 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
                 if (routes.Length == 0 || !TryMark(msg)) continue;
 
                 if (msg.grouped_id != 0) BufferAlbum(msg, routes);
-                else Enqueue(new Job([msg], routes));
+                else
+                {
+                    stats.Received(ConfiguredId(msg.peer_id));
+                    Enqueue(new Job([msg], routes));
+                }
             }
         }
         catch (Exception ex)
@@ -119,6 +131,7 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
             (_, list) => { lock (list) list.Add(msg); return list; });
 
         if (!isFirst) return;
+        stats.Received(ConfiguredId(msg.peer_id));      // an album counts as one post
         _ = Task.Run(async () =>
         {
             await Task.Delay(AlbumWindow);      // wait for the remaining album items
@@ -141,6 +154,7 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
 
     public async Task RunAsync(Client client, CancellationToken ct)
     {
+        _client = client;
         await RefreshPeersAsync(client, force: true);
 
         await foreach (var job in _queue.Reader.ReadAllAsync(ct))
@@ -164,10 +178,12 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
     private async Task ProcessAsync(Client client, Job job, CancellationToken ct)
     {
         var cfg = options.CurrentValue;
+        void Skip(IEnumerable<RouteConfig> skipped) { foreach (var r in skipped) stats.Skipped(r.RouteName); }
 
         // Route filter OnlyWithPhoto: the post (or at least one item of an album) must contain a photo.
         var hasPhoto = job.Messages.Any(m => m.media is MessageMediaPhoto);
         var routes = job.Routes.Where(r => !r.OnlyWithPhoto || hasPhoto).ToArray();
+        Skip(job.Routes.Except(routes));
         if (routes.Length == 0)
         {
             log.LogDebug("Message {Id}: no photo, skipped by OnlyWithPhoto", job.Messages[0].id);
@@ -179,7 +195,9 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
         var botPhones = new Dictionary<string, string>();
         foreach (var buttonText in routes.Where(r => r.PhoneFromBot).Select(r => r.PhoneButtonText).Distinct())
             if (await GetPhoneFromBotAsync(client, job.Messages, buttonText, ct) is { } phone) botPhones[buttonText] = phone;
-        routes = routes.Where(r => !r.PhoneFromBot || botPhones.ContainsKey(r.PhoneButtonText)).ToArray();
+        var withPhone = routes.Where(r => !r.PhoneFromBot || botPhones.ContainsKey(r.PhoneButtonText)).ToArray();
+        Skip(routes.Except(withPhone));
+        routes = withPhone;
         if (routes.Length == 0) return;
 
         var textMsg = job.Messages.FirstOrDefault(m => !string.IsNullOrEmpty(m.message));
@@ -207,9 +225,14 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
         if (hadMedia && media.Count == 0)
         {
             log.LogWarning("Message {Id}: media skipped (too large or unsupported), nothing sent", job.Messages[0].id);
+            Skip(routes);
             return;
         }
-        if (media.Count == 0 && string.IsNullOrWhiteSpace(rawText)) return;
+        if (media.Count == 0 && string.IsNullOrWhiteSpace(rawText))
+        {
+            Skip(routes);
+            return;
+        }
 
         // 2) Publish per route / per target.
         foreach (var route in routes)
@@ -221,7 +244,7 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
             if (route.Edits)
             {
                 var footer = route.PhoneFromBot
-                    ? route.PhoneTemplate.Replace("{phone}", botPhones[route.PhoneButtonText]) + route.ReplacementText
+                    ? (route.PhoneTemplate ?? "").Replace("{phone}", botPhones[route.PhoneButtonText]) + route.ReplacementText
                     : route.ReplacementText ?? "";
                 text = TextCleaner.Build(rawText, footer, media.Count > 0 ? cfg.CaptionLimit : MaxText, route.ToCleanOptions());
             }
@@ -258,6 +281,7 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
                     }, ct);
 
                     log.LogInformation("[{Route}] sent to {Target}", route.RouteName, targetId);
+                    stats.Sent(targetId);
                     Chain(sent, job, route);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -314,8 +338,8 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
 
     private static readonly TimeSpan PhoneCacheTtl = TimeSpan.FromHours(6);
 
-    /// <summary>The bot started last; its first reply that contains a phone number completes <see cref="Phone"/>.</summary>
-    private sealed record PendingReply(long BotId, TaskCompletionSource<string> Phone);
+    /// <summary>The bot started last; every reply of it that holds a phone number lands in <see cref="Replies"/> with its message id.</summary>
+    private sealed record PendingReply(long BotId, System.Threading.Channels.Channel<(int Id, string Phone)> Replies);
     private volatile PendingReply? _pending;
 
     // Used only by the single consumer, so no locking needed.
@@ -327,7 +351,9 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
     {
         if (_pending is not { } pending || m.peer_id is not PeerUser pu || pu.user_id != pending.BotId
             || m.flags.HasFlag(Message.Flags.out_)) return false;
-        if (TextCleaner.FindPhone(m.message) is { } phone) pending.Phone.TrySetResult(phone);
+        // The number comes as text ("📞 Aloqa uchun kontakt: 93 ...") or as a shared contact card.
+        var phone = m.media is MessageMediaContact { phone_number: { Length: > 0 } card } ? card : TextCleaner.FindPhone(m.message);
+        if (phone is not null) pending.Replies.Writer.TryWrite((m.id, phone));
         return true;        // greetings without a number are ignored; we keep waiting for the next message
     }
 
@@ -378,15 +404,39 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
             // Human-like pause before pressing the button, like before every send.
             await Task.Delay(Random.Shared.Next(cfg.MinDelayMs, Math.Max(cfg.MinDelayMs, cfg.MaxDelayMs) + 1), ct);
 
-            var pending = new PendingReply(bot.id, new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously));
+            var pending = new PendingReply(bot.id, System.Threading.Channels.Channel.CreateUnbounded<(int Id, string Phone)>());
             _pending = pending;     // set before starting, so a fast reply is not missed
             try
             {
-                await WithFloodWaitAsync(() => client.Messages_StartBot(
+                UpdatesBase? result = null;
+                await WithFloodWaitAsync(async () => result = await client.Messages_StartBot(
                     bot: new InputUser(bot.id, bot.access_hash), peer: new InputPeerUser(bot.id, bot.access_hash),
                     random_id: Helpers.RandomLong(), start_param: link.Param), ct);
 
-                var phone = await pending.Phone.Task.WaitAsync(TimeSpan.FromSeconds(cfg.BotReplyTimeoutSec), ct);
+                // Id of our "/start" message. A late reply to an earlier, timed-out start is older than it,
+                // so it is never taken for this post (it would put another listing's number under it).
+                var startId = result?.UpdateList.Select(u => u switch
+                {
+                    UpdateMessageID x => x.id,
+                    UpdateNewMessage { message: Message sentMsg } when sentMsg.flags.HasFlag(Message.Flags.out_) => sentMsg.id,
+                    _ => 0
+                }).DefaultIfEmpty().Max() ?? 0;
+
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(cfg.BotReplyTimeoutSec));
+                string? phone = null;
+                try
+                {
+                    await foreach (var reply in pending.Replies.Reader.ReadAllAsync(timeout.Token))
+                        if (reply.Id > startId) { phone = reply.Phone; break; }
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+                if (phone is null)
+                {
+                    log.LogWarning("Message {Id}: @{Bot} sent no phone number within {Sec} s, skipped", messages[0].id, link.Bot, cfg.BotReplyTimeoutSec);
+                    return null;
+                }
+
                 if (_phones.Count > 1000)
                     foreach (var (k, v) in _phones) if (DateTime.UtcNow - v.At > PhoneCacheTtl) _phones.Remove(k);
                 _phones[link] = (phone, DateTime.UtcNow);
@@ -398,16 +448,43 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
                 _pending = null;
             }
         }
-        catch (TimeoutException)
-        {
-            log.LogWarning("Message {Id}: @{Bot} sent no phone number within {Sec} s, skipped", messages[0].id, link.Bot, cfg.BotReplyTimeoutSec);
-        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             log.LogError(ex, "Message {Id}: starting @{Bot} failed, skipped", messages[0].id, link.Bot);
         }
         return null;
+    }
+
+    // ---------------------------------------------------------------- Statistics command
+
+    private volatile Client? _client;
+    private readonly ConcurrentDictionary<long, string> _titles = new();
+
+    // "/stats" = today and yesterday, "/stats 7" = the last 7 days
+    [GeneratedRegex(@"^/stats(?:\s+(?<days>\d{1,2}))?\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex StatsCommandRegex();
+
+    /// <summary>Called from OnUpdates: answers "/stats" written by the account itself in Saved Messages.</summary>
+    private bool TryStatsCommand(Message m, bool edited)
+    {
+        if (_client is not { } client || m.peer_id is not PeerUser pu || pu.user_id != client.UserId
+            || StatsCommandRegex().Match(m.message ?? "") is not { Success: true } match) return false;
+        if (edited) return true;
+
+        var days = match.Groups["days"].Success ? int.Parse(match.Groups["days"].Value) : 2;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await client.SendMessageAsync(InputPeer.Self, stats.Report(days, id => _titles.GetValueOrDefault(Normalize(id))));
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Sending /stats report failed");
+            }
+        });
+        return true;
     }
 
     // ---------------------------------------------------------------- Peers
@@ -429,7 +506,11 @@ public sealed partial class UserbotMessageHandler(IOptionsMonitor<UserbotConfig>
         {
             var chats = await client.Messages_GetAllChats();
             foreach (var (id, chat) in chats.chats)
-                if (chat is TL.Channel ch && ch.IsActive) _peers[id] = ch.ToInputPeer();
+                if (chat is TL.Channel ch && ch.IsActive)
+                {
+                    _peers[id] = ch.ToInputPeer();
+                    _titles[id] = ch.title;
+                }
             log.LogInformation("Chat list loaded ({Count} channels/groups)", _peers.Count);
         }
         catch (Exception ex)

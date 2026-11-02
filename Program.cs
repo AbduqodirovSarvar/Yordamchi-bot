@@ -4,6 +4,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 // reloadOnChange is on by default for appsettings.json -> IOptionsMonitor sees edits instantly.
 builder.Services.Configure<UserbotConfig>(builder.Configuration.GetSection(UserbotConfig.SectionName));
+builder.Services.AddSingleton<SendStats>();
 builder.Services.AddSingleton<UserbotMessageHandler>();
 builder.Services.AddHostedService<UserbotWorker>();
 
